@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+env/
+.ipynb_checkpoints/
+
+# LaTeX build products
+report/build/
+report/main.pdf
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.toc
+*.synctex.gz
+
+# Large data and model artifacts
+*.pt
+*.ckpt
+checkpoints/
+DATA/
+generated_tables/
+test_metrics_final.csv
+*.wav
+*.flac
+
+# Archives and OS files
+*.zip
+.DS_Store
+Thumbs.db

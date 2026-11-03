@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use this repository or the report, please cite the mid-term report."
+title: "Speaker-Aware Noise Cancellation and Target Speech Enhancement"
+version: 0.1.0
+date-released: "2026-11-03"
+repository-code: "https://github.com/frecklehead/SIC-AI-Project"
+url: "https://github.com/frecklehead/SIC-AI-Project"
+authors:
+  - family-names: Aryal
+    given-names: Austina
+  - family-names: Aryal
+    given-names: Prashamsa
+  - family-names: Shrestha
+    given-names: Sostika
+keywords:
+  - target speaker extraction
+  - speech enhancement
+  - BSRNN
+  - speaker conditioning
+  - deep learning
+abstract: >-
+  Mid-term research repository for a speaker-conditioned BSRNN target speech
+  extraction system. The model combines a frozen ECAPA-TDNN speaker encoder
+  with an eight-layer band-split RNN trained on LibriSpeech and DEMAND
+  mixtures. The repository contains the research notebooks, report source,
+  compiled report, and a training/evaluation code skeleton.

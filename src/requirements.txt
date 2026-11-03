@@ -10,3 +10,5 @@ pesq
 jiwer
 transformers
 accelerate
+matplotlib
+jupyterlab
