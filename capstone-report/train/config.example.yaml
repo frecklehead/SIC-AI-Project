@@ -1,0 +1,23 @@
+# Values copied from the notebook cfg_big override and study notes.
+# Dataset paths and manifests belong in the real project config.yaml.
+model:
+  N: 128
+  hidden: 256
+  layers: 8
+train:
+  epochs: 100
+  steps_per_epoch: 1000
+  batch_size: 8
+  lr: 0.0005
+  warmup_steps: 2000
+  num_workers: 2
+audio:
+  sample_rate: 16000
+  train_seconds: 4
+  eval_seconds: 6
+stft:
+  n_fft: 512
+  hop_length: 128
+loss:
+  w_sisdr: 1.0
+  w_mrstft: 5.0

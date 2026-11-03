@@ -1,0 +1,12 @@
+numpy
+pandas
+pyyaml
+soundfile
+torch
+tqdm
+speechbrain
+pystoi
+pesq
+jiwer
+transformers
+accelerate
