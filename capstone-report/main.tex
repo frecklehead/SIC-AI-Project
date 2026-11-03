@@ -186,8 +186,9 @@ ECAPA-TDNN encoder and conditioning ablation & \partl &
   Frozen ECAPA-TDNN with cached embeddings done; additive and FiLM conditioning implemented.
   The concat/FiLM/gating ablation is not done.\\
 Separator backbones & \partl &
-  Speaker-conditioned BSRNN trained for 100 epochs. Conv-TasNet was not trained to completion, so
-  no comparable result exists (\Cref{sec:changes}). TF-GridNet not attempted.\\
+  Conv-TasNet reached 5.90\,dB validation \sisdri{} at epoch 21 before being dropped;
+  speaker-conditioned BSRNN trained for 100 epochs (\Cref{sec:changes}). TF-GridNet not
+  attempted.\\
 Curriculum training and augmentation & \partl &
   Randomised scenarios, SIR/SNR and levels. No curriculum schedule and no reverberation yet.\\
 Evaluation and generalisation tests & \inprog &
@@ -212,9 +213,11 @@ recording.
 
 \subsection{Design changes}
 The largest change was the separator backbone. The proposal put Conv-TasNet first and BSRNN
-second. We later dropped Conv-TasNet, and the supplied sources contain no training run or log for
-it. We therefore cannot report a best SI-SDRi, epoch count or final configuration for that route.
-BSRNN became the model we trained to completion. \Cref{tab:changes} lists the other deviations.
+second. We trained a causal Conv-TasNet with $N=512$, $H=512$, film2 conditioning, 3\,s segments,
+batch 3 with gradient accumulation 2, and learning rate $10^{-3}$ for a planned 80 epochs. The
+saved best checkpoint is epoch~21 with validation \sisdri{} 5.90\,dB; a 20-clip check gave
+3.88\,dB on training voices and 3.60\,dB on held-out voices and noise. We dropped it because
+BSRNN reached 11.84\,dB validation \sisdri{}. \Cref{tab:changes} lists the other deviations.
 
 \begin{table}[htbp]
 \centering\footnotesize
@@ -224,7 +227,7 @@ BSRNN became the model we trained to completion. \Cref{tab:changes} lists the ot
 \toprule
 \textbf{Aspect} & \textbf{Proposal} & \textbf{Current} & \textbf{Reason}\\
 \midrule
-Separator & Causal Conv-TasNet; BSRNN as a stretch goal & Speaker-conditioned BSRNN, 8 dual-path layers & Conv-TasNet was not trained to completion\\
+Separator & Causal Conv-TasNet; BSRNN as a stretch goal & Speaker-conditioned BSRNN, 8 dual-path layers & Conv-TasNet reached 5.90\,dB validation \sisdri, below BSRNN's 11.84\,dB\\
 Causality & Strictly causal (past and current frames) & Non-causal (bidirectional LSTMs) & Causal operation is deferred\\
 STFT & 512-point FFT, 160-sample hop (10\,ms) & 512-point FFT, 128-sample hop (8\,ms) & Finer time resolution for BSRNN\\
 Speaker encoder & ECAPA-TDNN, frozen versus fine-tuned & Frozen ECAPA-TDNN, cached embeddings & Saves GPU time and memory\\
