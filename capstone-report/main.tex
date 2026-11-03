@@ -630,12 +630,12 @@ The largest gain is with a competing talker: WER drops from 40.4\% to 10.5\% for
 60.0\% to 31.9\% for speech plus noise. Noise-only mixtures are already easy for Whisper (7.0\%),
 and clean speech is not damaged (0\% WER).
 
-Additional diagnostics are collected here. The model improves \sisdr{} on
-88.3\% of the 1200 test mixtures. For the 845 mixtures with an interferer, the final checkpoint
-gives a mean \sisdri{} of 11.19\,dB when the output matches the target speaker and $-6.40$\,dB
-when it does not. The relative WER reduction is 52.9\%. \sisdri{} correlates strongly negatively
-with input \sisdr{} ($r=-0.90$), weakly negatively with SNR ($r=-0.21$) and SIR ($r=-0.11$), and
-essentially not with enrollment duration ($r=0.05$).
+Additional diagnostics come from both checkpoints. The earlier checkpoint improves \sisdr{} on
+88.3\% of the 1200 test mixtures, and its \sisdri{} correlates strongly negatively with input
+\sisdr{} ($r=-0.90$), weakly negatively with SNR ($r=-0.21$) and SIR ($r=-0.11$), and essentially
+not with enrollment duration ($r=0.05$). For the 845 mixtures with an interferer, the final
+checkpoint gives a mean \sisdri{} of 11.19\,dB when the output matches the target speaker and
+$-6.40$\,dB when it does not. The final-checkpoint relative WER reduction is 52.9\%.
 
 \subsection{Efficiency}
 \label{sec:eff}
