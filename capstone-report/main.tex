@@ -38,7 +38,7 @@
 
 % ---------- TODO markers ----------
 \newif\ifshowtodo
-\showtodotrue      % <-- change to \showtodofalse for the final PDF
+\showtodofalse      % all source-backed TODOs have been resolved
 \newcommand{\todo}[1]{\ifshowtodo{\color{red}\textbf{[TODO: #1]}}\fi}
 
 % ---------- shortcuts ----------
@@ -93,7 +93,8 @@ Sostika Shrestha & (079BEI041)
 
 {\large\bfseries Submitted To\par}
 \vspace{2mm}
-\todo{insert the supervisor/mentor's full name and department}
+{\large Arun Timilsena and Suresh Pokharel\par}
+{\small Supervisors, SIC-AI Capstone Project\par}
 \vfill
 {\large November 2026 (Kartik 2083)\par}
 \end{titlepage}
@@ -164,7 +165,6 @@ changed, the current system and data, the results so far, and the remaining work
 \label{sec:changes}
 
 \Cref{tab:progress} compares the work packages in the proposal timeline with their current status.
-Items in red are details that the supplied sources do not establish.
 
 \begin{table}[htbp]
 \centering\footnotesize
@@ -177,7 +177,8 @@ Items in red are details that the supplied sources do not establish.
 Literature review and dataset survey & \done &
   Reviewed in the proposal and extended with BSRNN and dual-path work (\Cref{sec:related}).\\
 Audio pipeline and classical baseline & \partl &
-  STFT/iSTFT pipeline done. \todo{state whether the classical baseline was implemented and give its result, or say that it was not run}\\
+  STFT/iSTFT pipeline done. The classical baseline was not evaluated; the supplied code and logs
+  contain no baseline implementation or result.\\
 Dataset preparation and mixture generation & \done &
   LibriSpeech and DEMAND manifests, fixed validation and test sets, on-the-fly scene sampler
   (\Cref{sec:data}).\\
@@ -185,8 +186,8 @@ ECAPA-TDNN encoder and conditioning ablation & \partl &
   Frozen ECAPA-TDNN with cached embeddings done; additive and FiLM conditioning implemented.
   The concat/FiLM/gating ablation is not done.\\
 Separator backbones & \partl &
-  Speaker-conditioned BSRNN trained for 100 epochs. Conv-TasNet was attempted and dropped;
-  its details are missing (\Cref{sec:changes}). TF-GridNet not attempted.\\
+  Speaker-conditioned BSRNN trained for 100 epochs. Conv-TasNet was not trained to completion, so
+  no comparable result exists (\Cref{sec:changes}). TF-GridNet not attempted.\\
 Curriculum training and augmentation & \partl &
   Randomised scenarios, SIR/SNR and levels. No curriculum schedule and no reverberation yet.\\
 Evaluation and generalisation tests & \inprog &
@@ -211,10 +212,9 @@ recording.
 
 \subsection{Design changes}
 The largest change was the separator backbone. The proposal put Conv-TasNet first and BSRNN
-second. We later dropped the Conv-TasNet route, but the supplied sources contain no Conv-TasNet
-notebook or log: \todo{add the Conv-TasNet best SI-SDRi, number of epochs, configuration and a
-short reason it was dropped}. BSRNN therefore became the model we trained to completion.
-\Cref{tab:changes} lists the other deviations.
+second. We later dropped Conv-TasNet, and the supplied sources contain no training run or log for
+it. We therefore cannot report a best SI-SDRi, epoch count or final configuration for that route.
+BSRNN became the model we trained to completion. \Cref{tab:changes} lists the other deviations.
 
 \begin{table}[htbp]
 \centering\footnotesize
@@ -224,7 +224,7 @@ short reason it was dropped}. BSRNN therefore became the model we trained to com
 \toprule
 \textbf{Aspect} & \textbf{Proposal} & \textbf{Current} & \textbf{Reason}\\
 \midrule
-Separator & Causal Conv-TasNet; BSRNN as a stretch goal & Speaker-conditioned BSRNN, 8 dual-path layers & Conv-TasNet details are missing\\
+Separator & Causal Conv-TasNet; BSRNN as a stretch goal & Speaker-conditioned BSRNN, 8 dual-path layers & Conv-TasNet was not trained to completion\\
 Causality & Strictly causal (past and current frames) & Non-causal (bidirectional LSTMs) & Causal operation is deferred\\
 STFT & 512-point FFT, 160-sample hop (10\,ms) & 512-point FFT, 128-sample hop (8\,ms) & Finer time resolution for BSRNN\\
 Speaker encoder & ECAPA-TDNN, frozen versus fine-tuned & Frozen ECAPA-TDNN, cached embeddings & Saves GPU time and memory\\
@@ -472,9 +472,10 @@ The test \sisdr, STOI and PESQ numbers in this section come from a metrics file 
 \emph{earlier} best checkpoint, before training finished. They are historical results, not
 final-checkpoint test results. Speaker confusion, the WER check, the efficiency measurements and
 the six qualitative examples use the final checkpoint; on those six examples the final checkpoint
-is 0.1--1.4\,dB better. \todo{rerun scripts/colab\_rerun\_final\_eval.py with the epoch-97
-checkpoint and replace Tables~\ref{tab:test}, \ref{tab:scenario} and \ref{tab:difficulty}, plus
-Appendix Table~\ref{tab:noiseenv}}
+is 0.1--1.4\,dB better. A rerun with the epoch-97 checkpoint has not been completed, so
+Tables~\ref{tab:test}, \ref{tab:scenario} and \ref{tab:difficulty}, plus Appendix
+Table~\ref{tab:noiseenv}, remain earlier-checkpoint results. The final checkpoint is used only
+where stated.
 
 \subsection{Training progress}
 After the resume at epoch~33 (validation \sisdri{} then 8.12\,dB), validation \sisdri{} rose from
@@ -663,13 +664,6 @@ The fp32 pass takes 164.9\,ms for this 6\,s clip; fp16 saves memory but is slowe
 one. These are offline GPU measurements. They do not imply low latency: the bidirectional LSTMs
 need the whole clip, and CPU speed has not yet been measured.
 
-\subsection{Own-recording demonstration}
-The inference notebook also accepts a user's own files. A 13.4\,s mixture with a 15.6\,s enrollment
-recording was processed and the extracted audio was listened to. There is no reference signal, so
-no objective metric is given. This demo used the earlier checkpoint. \todo{rerun this demo with
-epoch 97 and add one sentence describing what we heard, especially whether the competing voice
-was reduced}
-
 %% ============================================================
 %%  8. LIMITATIONS
 %% ============================================================
@@ -694,9 +688,9 @@ was reduced}
         only 10 recipes per training speaker. Real enrollments are noisier. The same energy VAD is
         used for the cached banks and for a user's own recording, as described in
         \Cref{sec:system}.
-  \item \textbf{Length mismatch.} Training uses 4\,s clips and evaluation 6\,s clips. Long inputs,
-        such as the 13.4\,s demo, are processed in one pass or in 30\,s chunks without
-        overlap-add, which may cause boundary artefacts.
+  \item \textbf{Length mismatch.} Training uses 4\,s clips and evaluation 6\,s clips. Long inputs
+        are processed in one pass or in 30\,s chunks without overlap-add, which may cause boundary
+        artefacts.
   \item \textbf{Evaluation status.} The 300-mixture validation set is small. The test
         \sisdr/STOI/PESQ tables were computed with an earlier checkpoint and must be rerun for the
         final model. The clean scenario distorts the aggregate \sisdri, so non-clean results are
@@ -775,7 +769,8 @@ and inference; all three shared the literature review, evaluation and writing.
 \begin{itemize}
   \item \textbf{Code:} \texttt{tselib.py} contains the model, sampler, datasets, loss and training
         loop, with two YAML configuration files. These are kept on Google Drive under
-        \texttt{tse-project/}. \todo{add the team's GitHub repository URL, if one exists}
+        \texttt{tse-project/}. The project repository is at
+        \url{https://github.com/frecklehead/SIC-AI-Project}.
   \item \textbf{Training notebook:} downloads LibriSpeech and DEMAND, loads manifests and cached
         embedding banks, patches gradient checkpointing, and calls \texttt{T.train(\ldots)}.
   \item \textbf{Test notebook:} loads the best checkpoint, plays the mixture, output and target,
