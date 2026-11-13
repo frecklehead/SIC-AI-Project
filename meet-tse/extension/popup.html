@@ -1,0 +1,17 @@
+<!doctype html><meta charset="utf-8">
+<style>
+  body{font:13px system-ui;width:300px;margin:12px;color:#1f1f1f}
+  h3{margin:0 0 8px} label{display:block;margin:8px 0 3px;font-weight:600}
+  input[type=text]{width:100%;box-sizing:border-box} button{margin-top:6px}
+  #status{margin-top:10px;padding:8px;border-radius:6px;background:#f1f3f4;white-space:pre-wrap}
+  .row{display:flex;align-items:center;gap:8px}
+</style>
+<h3>Meet TSE</h3>
+<div class="row"><input type="checkbox" id="enabled"><label for="enabled" style="margin:0">Extract target speaker</label></div>
+<div class="row"><input type="checkbox" id="rawmic"><label for="rawmic" style="margin:0">Disable Chrome's own noise suppression (recommended)</label></div>
+<label>Server URL</label><input type="text" id="url">
+<label>Enrollment audio (5–15 s of the target speaker)</label>
+<input type="file" id="file" accept="audio/*"><br><button id="up">Upload enrollment</button>
+<div id="status">…</div>
+<p style="color:#666">After changing settings, reload the Meet tab. Turn off Meet's built-in "Noise cancellation" too.</p>
+<script src="popup.js"></script>
