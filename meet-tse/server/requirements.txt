@@ -2,4 +2,5 @@ aiohttp>=3.9
 numpy
 soundfile
 sounddevice  # only needed by record_enrollment.py
+speechbrain  # frozen ECAPA-TDNN enrollment encoder
 torch   # install the build matching your CUDA/CPU
