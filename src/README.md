@@ -50,7 +50,7 @@ PYTHONPATH=/path/to/tse-project python src/evaluate.py \
 ```
 
 `evaluate.py` writes `test_metrics_final.csv` in the current directory when the required data and
-checkpoint are available. The report table generator expects that file:
+checkpoint are available. The report table generator can consume that file:
 
 ```bash
 python report/scripts/make_tables.py \
@@ -63,9 +63,9 @@ The orchestration is based on notebook cells 4–8, 14–18 and 20–21.
 
 ## Notes
 
-- `test_metrics_final.csv` is not committed because the final-checkpoint rerun has not been
-  completed on the available artifacts.
-- The test tables in the report therefore come from the earlier checkpoint; the report states this
-  limitation explicitly.
+- `test_metrics_final.csv` is not committed because the private evaluation artifacts are not
+  distributed.
+- The report tables were generated from the epoch-97 evaluation and are accompanied by the
+  notebook's saved outputs.
 - `report/scripts/plot_training.py` regenerates the training-curve figure from
   `report/data/training_log.csv`.
