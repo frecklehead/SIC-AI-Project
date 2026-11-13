@@ -69,17 +69,21 @@ class Runner:
 
     @property
     def ready(self):
-        return self.dummy or self.enroll is not None
+        return self.dummy or self.cond_t is not None
 
     def set_enrollment(self, wav: np.ndarray):
         """wav: float32 mono at the model sample rate; VAD-trimmed like training."""
-        self.enroll = wav.astype(np.float32)
+        wav = wav.astype(np.float32)
         if self.dummy:
+            self.enroll = wav
             return
         if self.speaker_encoder is None:
             from speaker_encoder import SpeakerEncoder
             self.speaker_encoder = SpeakerEncoder(device=self.device)
-        emb = self.speaker_encoder.embed(self.enroll, vad_cfg=self.vad_cfg, max_s=self.enroll_max)
+        # Compute everything before replacing the current enrollment. If the
+        # encoder rejects the clip, an existing working enrollment remains valid.
+        emb = self.speaker_encoder.embed(wav, vad_cfg=self.vad_cfg, max_s=self.enroll_max)
+        self.enroll = wav
         self.cond = emb
         self.cond_t = self.torch.from_numpy(emb)[None].to(self.device)
         print(f"[adapter] enrollment: {len(self.enroll) / 16000:.1f}s -> embedding norm {np.linalg.norm(emb):.1f}")
