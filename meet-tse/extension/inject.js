@@ -9,7 +9,9 @@
 
   const cfg = { enabled: true, prebufferMs: 150, maxBufferMs: 500, disableBrowserNS: true };
   const sessions = new Map(); // sid -> {ready}
-  let nextSid = 1;
+  // Unique per tab: the worker keys connections by sid, so two Meet tabs with
+  // sid=1 would otherwise close each other's socket.
+  let nextSid = 1 + Math.floor(Math.random() * 1e9);
 
   window.addEventListener('message', (e) => {
     const m = e.data;
@@ -78,10 +80,10 @@
           const i16 = new Int16Array(n);
           for (let i = 0; i < n; i++) { const v = Math.max(-1, Math.min(1, mono[i])); i16[i] = v < 0 ? v * 32768 : v * 32767; }
           post({ type: 'pcm', sid, buf: i16.buffer }, [i16.buffer]);
-          out = new Float32Array(n);
           if (!playing && ring.len >= sr * cfg.prebufferMs / 1000) playing = true;
-          if (playing && ring.len >= n) ring.read(out);
-          else if (playing) { playing = false; stats.under++; }   // underrun -> silence + re-buffer
+          if (playing && ring.len >= n) { out = new Float32Array(n); ring.read(out); }
+          else if (playing) { playing = false; stats.under++; }   // underrun -> raw mic, re-buffer
+          // else: still pre-buffering -> keep the raw mic, never silence
         } else {
           playing = false; if (ring) ring.clear();
         }
