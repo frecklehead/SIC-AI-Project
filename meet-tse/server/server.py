@@ -28,7 +28,7 @@ from resampler import StreamResampler
 from stream_engine import SlidingWindowTSE
 
 log = logging.getLogger("tse")
-MAX_LAG_S, RECOVER_LAG_S = 0.6, 0.15
+MAX_LAG_S = 0.6
 HERE = os.path.dirname(os.path.abspath(__file__))
 ENROLL_FILE = os.path.join(HERE, "enrollment.wav")
 
@@ -127,12 +127,18 @@ async def ws_handler(request):
     sess = None
     async for msg in ws:
         if msg.type == WSMsgType.TEXT:
-            cfg = json.loads(msg.data)
+            try:
+                cfg = json.loads(msg.data)
+            except (json.JSONDecodeError, TypeError):
+                log.warning("ignoring non-JSON text frame (%d bytes)", len(msg.data))
+                continue
             if cfg.get("type") == "start":
                 if not st.runner.ready:
                     await ws.send_json({"type": "error", "msg": "no enrollment audio uploaded yet"})
                     continue
                 sess = Session(st, int(cfg["sampleRate"]))
+                st.bypass = False
+                st.last_rtf = None
                 await ws.send_json({"type": "ready"})
                 log.info("session started @ %d Hz", sess.sr_in)
         elif msg.type == WSMsgType.BINARY and sess is not None:
@@ -141,18 +147,22 @@ async def ws_handler(request):
             if lag < 0:                       # client was idle: re-anchor
                 sess.t0 = time.monotonic() - sess.audio_s
                 lag = 0.0
-            if lag > MAX_LAG_S and not sess.bypass:
+            if not st.args.no_bypass and lag > MAX_LAG_S and not sess.bypass:
+                # Sticky for the rest of the session: re-enabling a model that is
+                # still slower than real time causes periodic stalls (worse than
+                # the raw mic). Reload the Meet tab to try again.
                 sess.bypass = True
                 st.bypass = True
-                log.warning("server too slow (lag %.2fs): bypassing model. Increase hop / shrink window / use GPU.", lag)
-            elif sess.bypass and lag < RECOVER_LAG_S:
-                sess.bypass = False
-                st.bypass = False
-                sess.reset_engine()
-                log.info("caught up, model re-enabled")
+                log.warning("server too slow (lag %.2fs): bypassing model for this session. "
+                            "Increase hop / shrink window / use a GPU.", lag)
             st.processing = True
             try:
                 out = await loop.run_in_executor(st.pool, sess.feed, msg.data)
+            except Exception:  # noqa: broad-except - keep the call alive, fail open
+                log.exception("inference failed; bypassing model for this session")
+                sess.bypass = True
+                st.bypass = True
+                out = msg.data
             finally:
                 st.processing = False
             if out:
@@ -187,6 +197,8 @@ def main():
     p.add_argument("--lookahead", type=float, default=0.16, help="future context before emitting (s); 0 for causal models")
     p.add_argument("--xfade-ms", type=float, default=8.0)
     p.add_argument("--enroll-max", type=float, default=15.0)
+    p.add_argument("--no-bypass", action="store_true",
+                   help="disable the real-time lag bypass (offline quality tests only)")
     p.add_argument("--device", default="auto")
     p.add_argument("--half", action="store_true", help="fp16 on CUDA")
     p.add_argument("--host", default="127.0.0.1")

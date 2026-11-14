@@ -12,7 +12,8 @@ SR, PORT = 48000, 8799
 
 
 async def main():
-    args = argparse.Namespace(sr=16000, window=2.0, hop=0.08, lookahead=0.16, xfade_ms=8.0, enroll_max=15.0)
+    args = argparse.Namespace(sr=16000, window=2.0, hop=0.08, lookahead=0.16, xfade_ms=8.0,
+                              enroll_max=15.0, no_bypass=False)
     runner = Runner("dummy")
     ar = web.AppRunner(make_app(args, runner)); await ar.setup()
     await web.TCPSite(ar, "127.0.0.1", PORT).start()
