@@ -20,7 +20,7 @@ def main() -> None:
         import sounddevice as sd
     except ImportError as exc:
         raise SystemExit("Install sounddevice to record from a microphone: pip install sounddevice") from exc
-    print(f"Recording {args.seconds:.1f}s at {args.rate} Hz; speak naturally after the countdown.")
+    print(f"Recording {args.seconds:.1f}s at {args.rate} Hz — speak now.")
     audio = sd.rec(int(args.seconds * args.rate), samplerate=args.rate, channels=1,
                    dtype="float32", device=args.device)
     sd.wait()
