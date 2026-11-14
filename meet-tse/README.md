@@ -53,6 +53,12 @@ End-to-end through the real server (1.5 s clip, `hop 0.16`, `lookahead 0.08`, in
 (**+12.32 dB SI-SDRi**) at the measured 88 ms delay. `offline_check.py` on the 4 s clip gives the
 slightly higher numbers above because it stays at 16 kHz and uses a smaller hop.
 
+Synthesized mixtures (1.5 s, `window 1.0 s`, `hop 0.16 s`, `lookahead 0.08 s`) at +5/0/−5 dB:
+whole-file SI-SDRi **+11.5 / +13.9 / +16.0 dB**; streaming **+2.9 / +7.2 / +11.2 dB** at 88 ms.
+Streaming on such short clips is dominated by the 1–2 s window fill (parity vs whole is only
+~8.9 dB), so use clips of at least 5 s for streaming scores; the 4 s sweep above is the
+representative result.
+
 ## Performance (why the server may bypass)
 `benchmark.py` on the development laptop (i7-1255U, 12 threads, **no CUDA**). The machine was
 memory-thrashing; these are best-case snapshots, not stable numbers (under heavier load a 2 s
