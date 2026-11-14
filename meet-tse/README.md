@@ -30,6 +30,32 @@ host permission are allowed. Verified on Chrome 156 with no flags.
 4. Chrome → `chrome://extensions` → Developer mode → Load unpacked → `extension/`
 5. Popup: upload enrollment audio (or pass `--enroll`), keep both checkboxes, reload the Meet tab.
    In Meet: Settings → Audio → turn OFF "Noise cancellation" (avoid double processing).
+   If the server was started with `--token`, paste the same token into the popup's Auth token field.
+
+## Auth (optional, recommended for a remote server)
+`server.py` accepts `--token SECRET`. When set, it rejects `/ws` without `?token=SECRET`
+and `/enroll` without either `Authorization: Bearer SECRET` or `X-TSE-Token: SECRET` (HTTP 401).
+The popup stores the token in `chrome.storage.local` and appends it to the WebSocket URL; it also
+uses it for the enrollment upload. `record_enrollment.py` accepts `--token` for its upload. Leave
+`--token` unset for the original unauthenticated localhost setup.
+
+## Remote server (Colab GPU + Cloudflare quick tunnel)
+The extension can also use a public `wss://` endpoint. `colab/run_server.ipynb` mounts Google Drive,
+installs the server dependencies, starts `server.py --half` (CUDA fp16), starts a Cloudflare quick
+tunnel, and prints the token plus a `wss://…trycloudflare.com/ws?token=…` URL. The server remains
+bound to `127.0.0.1`; cloudflared is the only public entry point.
+
+1. Put this repository and `src/checkpoints/tse_bsrnn_big_best.pt` in Drive, or edit `PROJECT_DIR`
+   in the notebook. Put a 5–15 s `my_voice.wav` there too if you want startup enrollment.
+2. Run the notebook cells in order; leave the live-log cell open to watch the server's `RTF` line.
+3. In the popup, set **Server URL** to the printed WSS URL and leave the token in the URL, or use the
+   base `wss://…/ws` plus the **Auth token** field. Upload enrollment if the notebook did not.
+4. Reload the Meet tab. The manifest already grants host access to `*.trycloudflare.com`, Jitsi, and
+   the WebRTC samples page for testing.
+
+The quick tunnel URL is ephemeral and publicly reachable while it runs. The token is the only access
+control, so treat both the URL and token as secrets and stop the Colab runtime when finished. A
+tunnel adds internet latency and is not private; do not send meeting audio you would not share.
 
 ## Measured quality (this checkpoint)
 LibriSpeech dev-clean two-speaker mixture, 4 s, 16 kHz, enrollment 4.8 s. Streaming uses the same
@@ -96,7 +122,8 @@ python offline_check.py --ckpt /path/tse_bsrnn_big_best.pt --enroll my_voice.wav
 python offline_check.py --ckpt /path/tse_bsrnn_big_best.pt --enroll my_voice.wav \
   --target me.wav --interferer other.wav --snr 5 0 -5 --seconds 2 \
   --lookahead-sweep 0 0.08 0.16 0.24                       # synthesized mixtures
-python record_enrollment.py --seconds 10
+python record_enrollment.py --seconds 10                 # add --token if the server requires it
+python auth_test.py                                        # --token 401 checks
 python robustness_test.py                                  # bursts, bad frames, slow/crashing model
 ```
 
@@ -107,7 +134,11 @@ localhost `/enroll`. `robustness_test.py` starts the server with fake runners an
 
 ## Known limits
 * Targets your OWN mic (what others hear). Extracting a remote speaker from incoming audio is a separate phase.
-* Chrome only (needs MediaStreamTrackProcessor/Generator). Server must be on localhost.
+* Chrome only (needs MediaStreamTrackProcessor/Generator). The server can be on localhost or behind
+  a TLS tunnel (see the Colab notebook); https/WSS is required for a public endpoint.
+* The Colab + cloudflared path is documented and its manifest permissions are in place, but a full
+  live Meet call through a public tunnel has not been verified here. The token and 401 paths are
+  covered by the server tests.
 * The first ~0.3–0.6 s of the extracted stream is near-silent while the 2 s model window fills.
   The extension passes the raw mic until its 150 ms jitter buffer is ready, but then plays that quiet
   head; this can clip the first word of a call. A raw-mic warmup for the first model window (or a
