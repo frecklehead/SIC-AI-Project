@@ -5,8 +5,8 @@
 // ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS.  Extension-origin contexts are
 // allowed (host_permissions include 127.0.0.1), so the socket lives here and
 // bridge.js only relays PCM over a runtime port.
-const DEFAULTS = { serverUrl: 'ws://127.0.0.1:8765/ws' };
-const conns = new Map(); // sid -> {ws, ready, alive, retry, post, sampleRate}
+const DEFAULTS = { serverUrl: 'ws://127.0.0.1:8765/ws', token: '' };
+const conns = new Map(); // sid -> {ws, ready, alive, retry, post, sampleRate, token}
 
 // chrome.runtime messaging is JSON-only, so PCM crosses the port as base64.
 function b64decode(b64) {
@@ -31,10 +31,15 @@ async function open(sid) {
   clearTimeout(c.retry);
   const gen = (c.gen = (c.gen || 0) + 1);   // invalidate handlers of an older socket
   if (c.ws) { try { c.ws.onclose = null; c.ws.close(); } catch (_) {} }
-  const { serverUrl } = await getCfg();
+  const { serverUrl, token: storedToken } = await getCfg();
+  const token = c.token || storedToken || '';
   if (!c.alive || c.gen !== gen) return;
   let ws;
-  try { ws = new WebSocket(serverUrl); }
+  try {
+    const url = new URL(serverUrl);
+    if (token) url.searchParams.set('token', token);
+    ws = new WebSocket(url.toString());
+  }
   catch (e) {
     c.post({ type: 'state', sid, ready: false, msg: String(e) });
     c.retry = setTimeout(() => open(sid), 2000);
@@ -83,7 +88,8 @@ chrome.runtime.onConnect.addListener((port) => {
       owned.add(m.sid);
       const old = conns.get(m.sid);
       if (old) close(m.sid);
-      conns.set(m.sid, { ws: null, ready: false, alive: true, retry: null, post, sampleRate: m.sampleRate });
+      conns.set(m.sid, { ws: null, ready: false, alive: true, retry: null, post,
+                         sampleRate: m.sampleRate, token: m.token || '' });
       open(m.sid);
     } else if (m.type === 'pcm') {
       const c = conns.get(m.sid);

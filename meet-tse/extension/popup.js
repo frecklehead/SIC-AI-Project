@@ -1,6 +1,6 @@
 const $ = (id) => document.getElementById(id);
-const DEFAULTS = { enabled: true, serverUrl: 'ws://127.0.0.1:8765/ws', disableBrowserNS: true };
-const http = (ws) => ws.replace(/^ws/, 'http').replace(/\/ws$/, '');
+const DEFAULTS = { enabled: true, serverUrl: 'ws://127.0.0.1:8765/ws', token: '', disableBrowserNS: true };
+const http = (ws) => ws.replace(/^ws/, 'http').replace(/\/ws(?:\?.*)?$/, '');
 async function refresh() {
   try {
     const s = await (await fetch(http($('url').value) + '/status')).json();
@@ -13,17 +13,28 @@ async function refresh() {
   } catch (e) { $('status').textContent = 'server: offline — start server.py'; }
 }
 chrome.storage.local.get(DEFAULTS, (c) => {
-  $('enabled').checked = c.enabled; $('rawmic').checked = c.disableBrowserNS; $('url').value = c.serverUrl; refresh();
+  $('enabled').checked = c.enabled; $('rawmic').checked = c.disableBrowserNS;
+  $('url').value = c.serverUrl; $('token').value = c.token || ''; refresh();
 });
 setInterval(refresh, 1000);
 $('enabled').onchange = () => chrome.storage.local.set({ enabled: $('enabled').checked });
 $('rawmic').onchange = () => chrome.storage.local.set({ disableBrowserNS: $('rawmic').checked });
 $('url').onchange = () => { chrome.storage.local.set({ serverUrl: $('url').value }); refresh(); };
+$('token').oninput = () => chrome.storage.local.set({ token: $('token').value.trim() });
+function requestToken() {
+  const typed = $('token').value.trim();
+  if (typed) return typed;
+  try { return new URL($('url').value).searchParams.get('token') || ''; }
+  catch (_) { return ''; }
+}
 $('up').onclick = async () => {
   const f = $('file').files[0]; if (!f) return ($('status').textContent = 'choose an audio file first');
+  const token = requestToken();
   $('status').textContent = 'uploading…';
   try {
-    const r = await (await fetch(http($('url').value) + '/enroll', { method: 'POST', body: f })).json();
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+    const r = await (await fetch(http($('url').value) + '/enroll',
+      { method: 'POST', body: f, headers })).json();
     $('status').textContent = r.ok ? `enrollment ready: ${r.seconds}s of audio` : `enrollment failed: ${r.msg}`;
   } catch (e) { $('status').textContent = 'upload failed: ' + e; }
   setTimeout(refresh, 1500);

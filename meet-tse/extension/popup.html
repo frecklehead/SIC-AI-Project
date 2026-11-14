@@ -10,6 +10,8 @@
 <div class="row"><input type="checkbox" id="enabled"><label for="enabled" style="margin:0">Extract target speaker</label></div>
 <div class="row"><input type="checkbox" id="rawmic"><label for="rawmic" style="margin:0">Disable Chrome's own noise suppression (recommended)</label></div>
 <label>Server URL</label><input type="text" id="url">
+<label>Auth token (if server started with <code>--token</code>)</label>
+<input type="password" id="token" autocomplete="off" placeholder="leave empty for no token">
 <label>Enrollment audio (5–15 s of the target speaker)</label>
 <input type="file" id="file" accept="audio/*"><br><button id="up">Upload enrollment</button>
 <div id="status">…</div>
