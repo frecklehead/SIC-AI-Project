@@ -1,0 +1,5 @@
+# Runtime downloads (SpeechBrain ECAPA weights) and local venv
+pretrained_ecapa/
+.venv/
+__pycache__/
+*.wav

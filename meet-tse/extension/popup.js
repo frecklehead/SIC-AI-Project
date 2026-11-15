@@ -4,7 +4,7 @@ const http = (ws) => ws.replace(/^ws/, 'http').replace(/\/ws$/, '');
 async function refresh() {
   try {
     const s = await (await fetch(http($('url').value) + '/status')).json();
-    const state = s.bypass ? 'BYPASS (model too slow; raw mic is flowing)' :
+    const state = s.bypass ? 'BYPASS (model too slow; raw mic is flowing — reload the Meet tab to retry)' :
       (s.processing ? 'processing' : 'ready');
     const rtf = s.rtf == null ? '' : `\nlast measured RTF: ${Number(s.rtf).toFixed(2)}`;
     $('status').textContent = `server: online (${s.device}${s.dummy ? ', DUMMY model' : ''})\n` +

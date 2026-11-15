@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "Real-time target speaker extraction on your microphone in Google Meet, powered by a local model server.",
   "permissions": ["storage"],
+  "background": { "service_worker": "background.js" },
   "host_permissions": ["https://meet.google.com/*", "http://127.0.0.1:8765/*", "http://localhost:8765/*"],
   "action": { "default_popup": "popup.html", "default_title": "Meet TSE" },
   "content_scripts": [
