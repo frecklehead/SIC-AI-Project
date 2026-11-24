@@ -23,6 +23,7 @@ class Runner:
         self.half = False
         self.torch = None
         self.speaker_encoder = None
+        self.last_inference_mode = False
         if self.dummy:
             return
 
@@ -54,6 +55,7 @@ class Runner:
             print("[adapter] checkpoint keys: missing=0 unexpected=0")
 
         self.model = model.to(self.device).eval()
+        self.model.requires_grad_(False)
         self.half = bool(half) and self.device == "cuda"
         if self.half:  # autocast, not .half(): STFT/iSTFT must stay fp32
             self.autocast = lambda: torch.autocast(device_type="cuda", dtype=torch.float16)
@@ -98,6 +100,7 @@ class Runner:
             return mix
         torch = self.torch
         with torch.inference_mode():
+            self.last_inference_mode = torch.is_inference_mode_enabled()
             t = torch.from_numpy(np.ascontiguousarray(mix, dtype=np.float32))[None].to(self.device)
             out = self._forward(t)
             if isinstance(out, (tuple, list)):

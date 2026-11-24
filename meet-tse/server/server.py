@@ -10,13 +10,18 @@ Protocol (ws://127.0.0.1:8765/ws), one websocket per processed mic track:
   client -> int16-LE mono PCM chunks                  binary
   server -> int16-LE mono PCM chunks (same rate)      binary
 HTTP: GET /status, POST /enroll (body = audio file: wav/flac/ogg).
+
+If --token is set, /ws requires ?token=... and /enroll requires either
+"Authorization: Bearer <token>" or "X-TSE-Token: <token>".
 """
 import argparse
 import asyncio
+import hmac
 import io
 import json
 import logging
 import os
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -31,6 +36,51 @@ log = logging.getLogger("tse")
 MAX_LAG_S = 0.6
 HERE = os.path.dirname(os.path.abspath(__file__))
 ENROLL_FILE = os.path.join(HERE, "enrollment.wav")
+
+
+class RedactTokenFilter(logging.Filter):
+    """Keep ?token=... out of aiohttp access logs."""
+
+    _token_re = re.compile(r"(token=)[^&\s\"]+")
+
+    def filter(self, record):
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        if "token=" in msg:
+            record.msg = self._token_re.sub(r"\1***", msg)
+            record.args = ()
+        return True
+
+
+def _expected_token(args) -> str:
+    """Token configured on the CLI, or an empty string when auth is disabled."""
+    return str(getattr(args, "token", "") or "")
+
+
+def _token_match(supplied, expected: str) -> bool:
+    # Encode so tokens containing non-ASCII characters are handled safely.
+    return hmac.compare_digest(str(supplied).encode("utf-8"), expected.encode("utf-8"))
+
+
+def _ws_token_ok(request, args) -> bool:
+    expected = _expected_token(args)
+    if not expected:
+        return True
+    supplied = request.query.get("token", "")
+    return _token_match(supplied, expected)
+
+
+def _enroll_token_ok(request, args) -> bool:
+    expected = _expected_token(args)
+    if not expected:
+        return True
+    auth = request.headers.get("Authorization", "")
+    supplied = auth[7:].strip() if auth[:7].lower() == "bearer " else ""
+    if not supplied:
+        supplied = request.headers.get("X-TSE-Token", "").strip()
+    return _token_match(supplied, expected)
 
 
 class State:
@@ -100,6 +150,9 @@ def _load_enrollment(data: bytes, sr_model: int, max_s: float) -> np.ndarray:
 
 async def enroll(request):
     st: State = request.app["st"]
+    if not _enroll_token_ok(request, st.args):
+        log.warning("rejected enrollment upload: bad token")
+        return web.json_response({"ok": False, "msg": "unauthorized"}, status=401)
     data = await request.read()
     try:
         wav = _load_enrollment(data, st.sr, st.args.enroll_max)
@@ -121,6 +174,9 @@ async def enroll(request):
 
 async def ws_handler(request):
     st: State = request.app["st"]
+    if not _ws_token_ok(request, st.args):
+        log.warning("rejected websocket: bad token")
+        return web.Response(status=401, text="unauthorized")
     ws = web.WebSocketResponse(max_msg_size=2 ** 22)
     await ws.prepare(request)
     loop = asyncio.get_running_loop()
@@ -201,10 +257,13 @@ def main():
                    help="disable the real-time lag bypass (offline quality tests only)")
     p.add_argument("--device", default="auto")
     p.add_argument("--half", action="store_true", help="fp16 on CUDA")
+    p.add_argument("--token", default="",
+                   help="shared secret: /ws?token=... and Authorization: Bearer ... on /enroll")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8765)
     args = p.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+    logging.getLogger("aiohttp.access").addFilter(RedactTokenFilter())
 
     runner = Runner(args.ckpt, args.device, args.half)
     src = args.enroll or (ENROLL_FILE if os.path.exists(ENROLL_FILE) else None)

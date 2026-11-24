@@ -15,6 +15,7 @@ def main() -> None:
     p.add_argument("--rate", type=int, default=16000)
     p.add_argument("--device", type=int, default=None)
     p.add_argument("--url", default="http://127.0.0.1:8765/enroll")
+    p.add_argument("--token", default="", help="server --token value, if enabled")
     args = p.parse_args()
     try:
         import sounddevice as sd
@@ -31,6 +32,8 @@ def main() -> None:
         f.setnchannels(1); f.setsampwidth(2); f.setframerate(args.rate); f.writeframes(raw)
     req = urllib.request.Request(args.url, data=buf.getvalue(), method="POST",
                                  headers={"Content-Type": "audio/wav"})
+    if args.token:
+        req.add_header("Authorization", f"Bearer {args.token}")
     with urllib.request.urlopen(req, timeout=30) as resp:
         print(resp.read().decode())
 

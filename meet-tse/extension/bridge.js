@@ -2,7 +2,7 @@
 // the MV3 service worker, which owns the WebSocket to the local TSE server.
 // The socket cannot live here: recent Chrome blocks content-script connections
 // to 127.0.0.1 with ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS.
-const DEFAULTS = { enabled: true, serverUrl: 'ws://127.0.0.1:8765/ws', prebufferMs: 150, disableBrowserNS: true };
+const DEFAULTS = { enabled: true, serverUrl: 'ws://127.0.0.1:8765/ws', token: '', prebufferMs: 150, disableBrowserNS: true };
 const conns = new Map(); // sid -> {port, alive, sampleRate}
 
 // chrome.runtime messaging is JSON-only, so PCM crosses the port as base64.
@@ -43,7 +43,12 @@ function connect(sid, sampleRate) {
     toPage({ type: 'state', sid, ready: false, msg: 'server unavailable' });
     setTimeout(() => { if (c.alive) connect(sid, sampleRate); }, 1000);  // worker restart
   });
-  port.postMessage({ type: 'start', sid, sampleRate });
+  // The worker owns the websocket, but the token is read here so a popup
+  // change is picked up the next time a Meet tab starts a microphone track.
+  getCfg().then(({ token }) => {
+    if (!c.alive || conns.get(sid) !== c) return;
+    port.postMessage({ type: 'start', sid, sampleRate, token: token || '' });
+  });
 }
 
 window.addEventListener('message', (e) => {
