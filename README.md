@@ -66,8 +66,8 @@ training voices and 3.60 dB on held-out voices and noise.
 
 ### Test metrics
 
-The table below is from the **earlier checkpoint** evaluation. The non-clean column is the headline
-result; the 65 clean-scenario items are excluded because their input SI-SDR is about 105 dB.
+The table below uses the **epoch-97 checkpoint**. The non-clean column is the headline result; the
+65 clean-scenario items are excluded because their input SI-SDR is about 105 dB.
 
 | Metric | Non-clean (`n=1135`) | All items (`n=1200`) |
 |---|---:|---:|
@@ -174,9 +174,8 @@ as the main document.
 ## Reproducibility notes
 
 - The best validation checkpoint is epoch 97 with **11.84 dB** SI-SDRi on unseen speakers.
-- The test SI-SDR/STOI/PESQ tables come from an earlier checkpoint. The final-checkpoint rerun is
-  documented in the report as a remaining task; `test_metrics_final.csv` is not present in this
-  repository.
+- The test SI-SDR/STOI/PESQ tables use the epoch-97 checkpoint and are reported with bootstrap
+  confidence intervals in the report. The private per-mixture CSV is not included here.
 - Speaker confusion, Whisper WER, efficiency and the six qualitative examples use the final epoch-97
   checkpoint.
 - The DEMAND recordings are split by time, not by unseen noise environment. The test set therefore
@@ -188,8 +187,6 @@ as the main document.
 
 ## Limitations and next steps
 
-- Re-evaluate the final epoch-97 checkpoint on the full test set and replace the earlier-checkpoint
-  tables with bootstrap confidence intervals.
 - Build a causal or low-latency variant if the deployment target requires streaming.
 - Add target-absent training and evaluation, unseen-noise tests, and reverberant conditions.
 - Reduce speaker confusion, especially for 2–3 s enrollments, where the error rate is highest.

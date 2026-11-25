@@ -10,7 +10,7 @@ Main BSRNN run:
 
 - data preparation and manifest checks;
 - training with the final configuration (`N=128`, hidden 256, 8 layers, 100 epochs);
-- validation and earlier-checkpoint test evaluation;
+- validation and epoch-97 test evaluation;
 - speaker-confusion analysis on the final checkpoint;
 - Whisper WER check;
 - efficiency measurement on an NVIDIA L4;

@@ -11,6 +11,17 @@ plt.rcParams.update({"font.size": 8.5, "axes.grid": True, "grid.alpha": .25,
                      "axes.spines.right": False, "savefig.bbox": "tight",
                      "pdf.fonttype": 42})
 df = pd.read_csv("data/training_log.csv")
+# The final run uses explicit SI-SDR column names; retain aliases for older logs.
+df = df.rename(columns={
+    "train_si_sdr": "train_sisdr",
+    "val_si_sdr": "val_sisdr",
+    "val_si_sdri": "val_sisdri",
+    "train_loss": "loss",
+})
+required = {"epoch", "loss", "train_sisdr", "val_sisdr", "val_sisdri"}
+missing = required - set(df.columns)
+if missing:
+    raise SystemExit("training log is missing columns: " + ", ".join(sorted(missing)))
 
 fig, ax = plt.subplots(1, 2, figsize=(7.0, 2.45))
 ax[0].plot(df.epoch, df.train_sisdr, "-", lw=1.4, color="0.10",
