@@ -24,6 +24,7 @@ import logging
 import os
 import re
 import sys
+import statistics
 import threading
 import time
 
@@ -139,10 +140,6 @@ class State:
         self.args, self.runner, self.sr = args, runner, args.sr
         self.sessions = set()
         self.next_session_id = 1
-        self.metrics_lock = threading.Lock()
-        self.step_times = collections.deque()
-        self.messages = 0
-        self.samples_dropped = 0
         self.last_rtf = None
         try:
             import psutil
@@ -180,8 +177,23 @@ class Session:
         self.debug_timing = bool(getattr(st.args, "debug_timing", False))
         self.timing_rows = collections.deque() if self.debug_timing else None
         self.timing_lock = threading.Lock()
+        self.metrics_lock = threading.Lock()
+        self.window_input_samples = 0
+        self.window_output_samples = 0
+        self.window_message_sizes = []
+        self.message_sizes = []
+        self.window_step_times = []
+        self.window_engine_input_samples = 0
         self.last_parts_ms = None
         self.last_step_ran = False
+        self.dump_dir = getattr(st.args, "dump_audio", None) if sid > 0 else None
+        self._dump_lock = threading.Lock()
+        self._dump_files = None
+        self._dump_paths = {}
+        self._dump_totals = {"input": 0, "engine_input": 0, "output": 0}
+        self._last_dump_flush = time.monotonic()
+        if self.dump_dir:
+            self._open_audio_dump()
 
     def reset_engine(self):
         a = self.st.args
@@ -209,9 +221,99 @@ class Session:
             sample_count = len(pcm) // 2
             self._input_samples += sample_count
             self.total_input_samples += sample_count
-            with self.st.metrics_lock:
-                self.st.messages += 1
             self._condition.notify()
+        with self.metrics_lock:
+            self.window_input_samples += sample_count
+            self.window_message_sizes.append(sample_count)
+            self.message_sizes.append(sample_count)
+        self._dump_input(pcm)
+
+    def _open_audio_dump(self):
+        opened = {}
+        try:
+            import soundfile as sf
+            os.makedirs(self.dump_dir, exist_ok=True)
+            prefix = os.path.join(self.dump_dir, f"session{self.id}")
+            self._dump_paths = {
+                "input": prefix + "_input_as_received.wav",
+                "engine_input": prefix + "_engine_input_16k.wav",
+                "output": prefix + "_output.wav",
+            }
+            opened["input"] = sf.SoundFile(self._dump_paths["input"], mode="w",
+                                            samplerate=self.sr_in, channels=1, format="WAV",
+                                            subtype="PCM_16")
+            opened["engine_input"] = sf.SoundFile(
+                self._dump_paths["engine_input"], mode="w", samplerate=self.st.sr,
+                channels=1, format="WAV", subtype="FLOAT")
+            opened["output"] = sf.SoundFile(self._dump_paths["output"], mode="w",
+                                            samplerate=self.sr_in, channels=1, format="WAV",
+                                            subtype="PCM_16")
+            self._dump_files = opened
+        except Exception:
+            for audio_file in opened.values():
+                try:
+                    audio_file.close()
+                except Exception:
+                    pass
+            self._dump_files = None
+            log.exception("session id=%d could not open audio dump files in %s",
+                          self.id, self.dump_dir)
+
+    def _dump_write(self, name, values):
+        if self._dump_files is None or not len(values):
+            return
+        with self._dump_lock:
+            if self._dump_files is None:
+                return
+            try:
+                self._dump_files[name].write(values)
+                self._dump_totals[name] += len(values)
+                now = time.monotonic()
+                if now - self._last_dump_flush >= 30.0:
+                    for audio_file in self._dump_files.values():
+                        audio_file.flush()
+                    self._last_dump_flush = now
+            except Exception:
+                log.exception("session id=%d audio dump write failed (%s)", self.id, name)
+
+    def _dump_input(self, pcm):
+        if self._dump_files is not None:
+            self._dump_write("input", np.frombuffer(pcm, dtype="<i2"))
+
+    def _dump_engine_input(self, audio):
+        if audio.size:
+            self._dump_write("engine_input", np.asarray(audio, dtype=np.float32))
+            with self.metrics_lock:
+                self.window_engine_input_samples += int(audio.size)
+
+    def record_output_sent(self, pcm):
+        if not pcm:
+            return
+        sample_count = len(pcm) // 2
+        with self.metrics_lock:
+            self.window_output_samples += sample_count
+        if self._dump_files is not None:
+            self._dump_write("output", np.frombuffer(pcm, dtype="<i2"))
+
+    def close_audio_dump(self):
+        if not self.dump_dir:
+            return
+        with self._dump_lock:
+            files, self._dump_files = self._dump_files, None
+            if files is not None:
+                try:
+                    for audio_file in files.values():
+                        audio_file.flush()
+                        audio_file.close()
+                except Exception:
+                    log.exception("session id=%d failed to finalize audio dumps", self.id)
+        median_samples = statistics.median(self.message_sizes) if self.message_sizes else 0
+        log.info("audio dump session id=%d declared_sampleRate=%d "
+                 "median_message_samples=%.1f input_samples=%d "
+                 "engine_input_16k_samples=%d output_samples=%d files=%s",
+                 self.id, self.sr_in, median_samples,
+                 self._dump_totals["input"], self._dump_totals["engine_input"],
+                 self._dump_totals["output"], self._dump_paths)
 
     def set_passthrough(self):
         with self._condition:
@@ -279,7 +381,6 @@ class Session:
                     remaining_drop = n_drop
                     self._consumed_samples += n_drop
                     self.samples_dropped += n_drop
-                    self.st.samples_dropped += n_drop
                     if self.stateful:
                         self.eng.tail.zero_()
                     while remaining_drop:
@@ -362,12 +463,13 @@ class Session:
             t3 = time.perf_counter()
             if y16.size and self.eng.last_step_ms:
                 self.last_step_ran = True
-                with self.st.metrics_lock:
-                    self.st.step_times.append(self.eng.last_step_ms)
+                with self.metrics_lock:
+                    self.window_step_times.append(self.eng.last_step_ms)
             y = self.up.process(y16)
             t4 = time.perf_counter()
             out = (np.clip(y, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
             t5 = time.perf_counter()
+            self._dump_engine_input(x16)
             self.last_parts_ms = {
                 "decode": (t1 - t0) * 1e3,
                 "resample_down": (t2 - t1) * 1e3,
@@ -377,11 +479,13 @@ class Session:
             }
             return out, self.last_parts_ms
         x = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
-        y16 = self.eng.push(self.down.process(x))
+        x16 = self.down.process(x)
+        y16 = self.eng.push(x16)
         if y16.size and self.eng.last_step_ms:
             self.last_step_ran = True
-            with self.st.metrics_lock:
-                self.st.step_times.append(self.eng.last_step_ms)
+            with self.metrics_lock:
+                self.window_step_times.append(self.eng.last_step_ms)
+        self._dump_engine_input(x16)
         y = self.up.process(y16)
         return (np.clip(y, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
 
@@ -390,51 +494,54 @@ class Session:
         elapsed = now - self.last_log
         if elapsed < 5.0:
             return
-        st = self.st
-        with st.metrics_lock:
-            steps = list(st.step_times)
-            st.step_times.clear()
-            messages, st.messages = st.messages, 0
-            dropped, st.samples_dropped = st.samples_dropped, 0
+        with self.metrics_lock:
+            steps = self.window_step_times
+            self.window_step_times = []
+            input_samples, self.window_input_samples = self.window_input_samples, 0
+            output_samples, self.window_output_samples = self.window_output_samples, 0
+            engine_samples, self.window_engine_input_samples = self.window_engine_input_samples, 0
+            message_sizes, self.window_message_sizes = self.window_message_sizes, []
+            dropped, self.samples_dropped = self.samples_dropped, 0
+        messages = len(message_sizes)
+        median_message = statistics.median(message_sizes) if message_sizes else 0.0
+        input_rate = input_samples / max(self.sr_in * elapsed, 1e-9)
+        output_rate = output_samples / max(self.sr_in * elapsed, 1e-9)
+        observed_rate = input_samples / max(elapsed, 1e-9)
+        rate_anomaly = not 0.9 <= input_rate <= 1.1
         if steps:
             avg, mx = float(np.mean(steps)), max(steps)
             p95 = float(np.percentile(steps, 95))
-            budget = self.eng.cf * self.st.runner.model.hop / self.st.sr * 1e3 if self.stateful else st.args.hop * 1e3
-            st.last_rtf = avg / max(budget, 1e-9)
-            log.info("model step avg %.1f ms / p95 %.1f ms / max %.1f ms (budget %.1f ms) RTF=%.2f",
-                     avg, p95, mx, budget, st.last_rtf)
+            budget = (self.eng.cf * self.st.runner.model.hop / self.st.sr * 1e3
+                      if self.stateful else self.st.args.hop * 1e3)
+            self.st.last_rtf = avg / max(budget, 1e-9)
+            log.info("model step session=%d avg %.1f ms / p95 %.1f ms / max %.1f ms "
+                     "(budget %.1f ms) RTF=%.2f",
+                     self.id, avg, p95, mx, budget, self.st.last_rtf)
         if self.debug_timing:
-            rows = []
-            for session in list(st.sessions):
-                with session.timing_lock:
-                    rows.extend(session.timing_rows)
-                    session.timing_rows.clear()
+            with self.timing_lock:
+                rows = list(self.timing_rows)
+                self.timing_rows.clear()
             values = {key: [row[key] for row in rows if key in row]
                       for key in ("decode", "resample_down", "engine_push", "resample_up", "int16")}
-            active = len(st.sessions)
-            fill_ms = max((s.buffer_fill_ms for s in st.sessions), default=0.0)
-            if st.process is not None:
-                cpu = st.process.cpu_percent(None)
-                nthreads = st.process.num_threads()
-                thread_info = str(nthreads)
-                cpu_info = f"{cpu:.1f}%"
-            else:
-                nthreads = threading.active_count()
-                thread_info = f"{nthreads}(psutil unavailable)"
-                cpu_info = "n/a(psutil unavailable)"
             def stat(key):
                 data = values[key]
                 return f"{np.mean(data):.2f}/{max(data):.2f}ms" if data else "n/a"
-            log.info("debug timing %.1fs steps/s=%.1f step avg/p95/max=%s/%s/%s "
-                     "input messages/s=%.1f buffer=%.1fms dropped=%d active=%d "
-                     "decode/down/engine/up/int16=%s/%s/%s/%s/%s CPU=%s threads=%s",
-                     elapsed, len(steps) / elapsed,
+            log.info("debug timing id=%d wall_s=%.1f steps/s=%.2f "
+                     "step_avg/p95/max_ms=%s/%s/%s "
+                     "input_audio_s_per_wall_s=%.3f output_audio_s_per_wall_s=%.3f "
+                     "declared_sampleRate=%d observed_effective_sampleRate=%.1f "
+                     "INPUT_RATE_ANOMALY=%s median_message_samples=%.1f messages/s=%.1f "
+                     "engine_input_16k_samples=%d dropped_samples=%d "
+                     "decode/down/engine/up/int16_avg/max=%s/%s/%s/%s/%s",
+                     self.id, elapsed, len(steps) / elapsed,
                      f"{np.mean(steps):.2f}" if steps else "n/a",
                      f"{np.percentile(steps,95):.2f}" if steps else "n/a",
                      f"{max(steps):.2f}" if steps else "n/a",
-                     messages / elapsed, fill_ms, dropped, active,
+                     input_rate, output_rate, self.sr_in, observed_rate,
+                     int(rate_anomaly), median_message, messages / elapsed,
+                     engine_samples, dropped,
                      stat("decode"), stat("resample_down"), stat("engine_push"),
-                     stat("resample_up"), stat("int16"), cpu_info, thread_info)
+                     stat("resample_up"), stat("int16"))
         self.last_log = now
 
 
@@ -517,9 +624,20 @@ async def ws_handler(request):
                 return
             try:
                 await ws.send_bytes(chunk)
-            except (ConnectionResetError, ClientConnectionResetError):
+                session.record_output_sent(chunk)
+            except (ConnectionResetError, ClientConnectionResetError, RuntimeError):
                 session.stop()
                 return
+
+    async def finish_session(session, writer_task):
+        session.stop()
+        if session._worker:
+            await asyncio.to_thread(session._worker.join)
+        if writer_task:
+            await asyncio.gather(writer_task, return_exceptions=True)
+        session.close_audio_dump()
+        st.sessions.discard(session)
+        log.info("session closed id=%d", session.id)
 
     try:
         async for msg in ws:
@@ -534,10 +652,8 @@ async def ws_handler(request):
                         await ws.send_json({"type": "error", "msg": "no enrollment audio uploaded yet"})
                         continue
                     if sess is not None:
-                        sess.stop()
-                        st.sessions.discard(sess)
-                        if writer:
-                            writer.cancel()
+                        await finish_session(sess, writer)
+                        sess, writer = None, None
                     peer = request.transport.get_extra_info("peername")
                     remote_port = peer[1] if peer and len(peer) > 1 else "?"
                     sid = st.next_session_id
@@ -552,21 +668,16 @@ async def ws_handler(request):
                     outq = asyncio.Queue()
                     sess.start_worker(loop, outq)
                     writer = asyncio.create_task(write_output(sess, outq))
-                    log.info("session started id=%d port=%s active=%d %s", sid, remote_port,
-                             len(st.sessions), backend_summary(st.runner, st.args))
+                    log.info("session started id=%d port=%s sampleRate=%d active=%d %s",
+                             sid, remote_port, sess.sr_in, len(st.sessions),
+                             backend_summary(st.runner, st.args))
                     await ws.send_json({"type": "ready"})
             elif msg.type == WSMsgType.BINARY and sess is not None:
                 sess.append(msg.data, time.monotonic())
                 sess.log_window()
     finally:
         if sess is not None:
-            sess.stop()
-            if sess._worker:
-                await asyncio.to_thread(sess._worker.join)
-            st.sessions.discard(sess)
-            log.info("session closed id=%d", sess.id)
-        if writer:
-            writer.cancel()
+            await finish_session(sess, writer)
     return ws
 
 
@@ -605,7 +716,9 @@ def main():
     p.add_argument("--single-session", action="store_true",
                    help="make older active sessions raw passthrough when a new one starts")
     p.add_argument("--debug-timing", action="store_true",
-                   help="log message-size, stage-time, lag, and worker utilization summaries every 5 s")
+                   help="log per-session audio rates and engine timings every 5 s")
+    p.add_argument("--dump-audio", metavar="DIR",
+                   help="write per-session received, engine-input, and returned WAV files")
     p.add_argument("--device", default="auto")
     p.add_argument("--half", action="store_true", help="fp16 on CUDA")
     p.add_argument("--token", default="",
