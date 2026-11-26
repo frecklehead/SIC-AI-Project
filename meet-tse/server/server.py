@@ -250,7 +250,8 @@ def main():
     p.add_argument("--sr", type=int, default=16000, help="model sample rate")
     p.add_argument("--window", type=float, default=2.0, help="context fed to the model (s)")
     p.add_argument("--hop", type=float, default=0.08, help="how often the model runs (s)")
-    p.add_argument("--lookahead", type=float, default=0.16, help="future context before emitting (s); 0 for causal models")
+    p.add_argument("--lookahead", type=float, default=None,
+                   help="future context before emitting (s); defaults to 0 for causal and 0.16 otherwise")
     p.add_argument("--xfade-ms", type=float, default=8.0)
     p.add_argument("--enroll-max", type=float, default=15.0)
     p.add_argument("--no-bypass", action="store_true",
@@ -266,6 +267,8 @@ def main():
     logging.getLogger("aiohttp.access").addFilter(RedactTokenFilter())
 
     runner = Runner(args.ckpt, args.device, args.half)
+    if args.lookahead is None:
+        args.lookahead = 0.0 if runner.causal else 0.16
     src = args.enroll or (ENROLL_FILE if os.path.exists(ENROLL_FILE) else None)
     if src and not runner.dummy:
         with open(src, "rb") as f:

@@ -24,6 +24,7 @@ class Runner:
         self.torch = None
         self.speaker_encoder = None
         self.last_inference_mode = False
+        self.causal = False
         if self.dummy:
             return
 
@@ -32,6 +33,7 @@ class Runner:
         self.device = ("cuda" if torch.cuda.is_available() else "cpu") if device == "auto" else device
 
         obj = torch.load(ckpt, map_location="cpu", weights_only=False)
+        cfg, meta = {}, {}
         if isinstance(obj, torch.nn.Module):
             model, mcfg, meta = obj, None, {}
         else:
@@ -46,6 +48,7 @@ class Runner:
             sd = {k.replace("module.", "", 1): v for k, v in sd.items()}
             mcfg = dict(DEFAULT_MODEL_CFG)
             mcfg.update(cfg.get("model") or {})
+            self.causal = bool(mcfg["causal"])
             model = build_model(mcfg)
             missing, unexpected = model.load_state_dict(sd, strict=False)
             if missing or unexpected:
@@ -53,6 +56,8 @@ class Runner:
                     f"checkpoint wiring mismatch: missing={missing}, unexpected={unexpected}"
                 )
             print("[adapter] checkpoint keys: missing=0 unexpected=0")
+        if isinstance(obj, torch.nn.Module):
+            self.causal = bool(getattr(model, "causal", False))
 
         self.model = model.to(self.device).eval()
         self.model.requires_grad_(False)

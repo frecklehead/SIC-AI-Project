@@ -10,8 +10,8 @@ training code load and run with identical semantics:
   * speaker: L2-normalised 192-d ECAPA -> 192->spk_hidden->spk_hidden (PReLU)
   * speaker vector added once to the band features, then FiLM before every
     layer's time block; parameters are "gamma, beta" applied as x*(1+g)+b
-  * per layer: time BiLSTM over T, then band BiLSTM over the 28 bands, both
-    with a residual projection
+  * per layer: configurable time and band LSTMs over the time frames and bands,
+    both with a residual projection
   * mask decoder per band: LayerNorm, Linear(N,4N), Tanh, Linear(4N, 2*bins*2),
     GLU -> interleaved (Re, Im) mask per bin, unbounded complex mask
 
@@ -25,7 +25,7 @@ SR = 16000
 
 DEFAULT_MODEL_CFG = {
     "n_fft": 512, "hop": 128, "N": 128, "hidden": 256, "layers": 8,
-    "emb_dim": 192, "spk_hidden": 256,
+    "emb_dim": 192, "spk_hidden": 256, "causal": False, "band_bidir": True,
 }
 
 
@@ -64,13 +64,13 @@ class BandSplit(nn.Module):
 
 
 class RNNBlock(nn.Module):
-    """LayerNorm -> BiLSTM -> linear projection, added as a residual."""
+    """LayerNorm -> LSTM -> linear projection, added as a residual."""
 
-    def __init__(self, N, hidden):
+    def __init__(self, N, hidden, bidirectional=True):
         super().__init__()
         self.norm = nn.LayerNorm(N)
-        self.rnn = nn.LSTM(N, hidden, batch_first=True, bidirectional=True)
-        self.proj = nn.Linear(2 * hidden, N)
+        self.rnn = nn.LSTM(N, hidden, batch_first=True, bidirectional=bidirectional)
+        self.proj = nn.Linear(hidden * (2 if bidirectional else 1), N)
 
     def forward(self, x):
         y, _ = self.rnn(self.norm(x))
@@ -78,9 +78,10 @@ class RNNBlock(nn.Module):
 
 
 class DualPathLayer(nn.Module):
-    def __init__(self, N, hidden, spk_dim):
+    def __init__(self, N, hidden, spk_dim, causal=False, band_bidir=True):
         super().__init__()
-        self.time, self.band = RNNBlock(N, hidden), RNNBlock(N, hidden)
+        self.time = RNNBlock(N, hidden, bidirectional=not causal)
+        self.band = RNNBlock(N, hidden, bidirectional=band_bidir)
         self.film = nn.Linear(spk_dim, 2 * N)
         nn.init.zeros_(self.film.weight)
         nn.init.zeros_(self.film.bias)
@@ -117,6 +118,7 @@ class TSEBSRNN(nn.Module):
     def __init__(self, mcfg):
         super().__init__()
         self.n_fft, self.hop = mcfg["n_fft"], mcfg["hop"]
+        self.causal = bool(mcfg["causal"])
         N, H = mcfg["N"], mcfg["hidden"]
         self.bands = make_bands(self.n_fft)
         self.register_buffer("window", torch.hann_window(self.n_fft), persistent=False)
@@ -124,7 +126,14 @@ class TSEBSRNN(nn.Module):
         S = mcfg["spk_hidden"]
         self.spk_enc = nn.Sequential(nn.Linear(mcfg["emb_dim"], S), nn.PReLU(), nn.Linear(S, S))
         self.spk_add = nn.Linear(S, N)
-        self.layers = nn.ModuleList([DualPathLayer(N, H, S) for _ in range(mcfg["layers"])])
+        self.layers = nn.ModuleList([
+            DualPathLayer(
+                N, H, S,
+                causal=mcfg["causal"],
+                band_bidir=mcfg["band_bidir"],
+            )
+            for _ in range(mcfg["layers"])
+        ])
         self.decoder = MaskDecoder(self.bands, N)
 
     def forward(self, mix, emb):

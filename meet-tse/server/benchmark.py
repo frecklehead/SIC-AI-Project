@@ -15,14 +15,20 @@ def main() -> None:
     p.add_argument("--device", default="auto")
     p.add_argument("--half", action="store_true")
     p.add_argument("--reps", type=int, default=3)
+    p.add_argument("--windows", type=float, nargs="+", default=[1.0, 1.5, 2.0])
+    p.add_argument("--hops", type=float, nargs="+", default=[0.04, 0.08, 0.16])
+    p.add_argument("--lookahead", type=float, default=None)
     args = p.parse_args()
     runner = Runner(args.ckpt, args.device, args.half)
+    lookahead = args.lookahead
+    if lookahead is None:
+        lookahead = 0.0 if runner.causal else 0.16
     sr = 16000
     runner.cond_t = runner.torch.zeros(1, 192, device=runner.device)
     print(f"device={runner.device} half={runner.half}")
     print("window_s hop_s avg_step_ms RTF approx_latency_ms")
-    for window in (1.0, 1.5, 2.0):
-        for hop in (0.04, 0.08, 0.16):
+    for window in args.windows:
+        for hop in args.hops:
             n = int(window * sr)
             x = np.zeros(n, np.float32)
             runner.warmup(n)
@@ -35,7 +41,7 @@ def main() -> None:
                 times.append((time.perf_counter() - t0) * 1000)
             avg = float(np.mean(times))
             rtf = avg / (hop * 1000)
-            latency = 1000 * (hop + 0.16 + 0.008)
+            latency = 1000 * (hop + lookahead + 0.008)
             print(f"{window:8.2f} {hop:6.2f} {avg:12.1f} {rtf:5.2f} {latency:17.1f}")
 
 

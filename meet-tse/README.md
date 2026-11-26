@@ -25,6 +25,8 @@ host permission are allowed. Verified on Chrome 156 with no flags.
    `python server.py --ckpt /path/tse_bsrnn_big_best.pt --enroll my_voice.wav`
    The bundled adapter is matched to the project checkpoint (16 kHz, 512-point STFT, hop 128,
    16.83M parameters, frozen 192-d ECAPA enrollment conditioning). Use `--half` only on CUDA.
+   Checkpoints with a `cfg.model` architecture config are supported, including causal v2
+   (`causal=true`, `band_bidir=true`); the server defaults its lookahead to 0 for causal models.
    First start downloads the frozen ECAPA weights into `server/pretrained_ecapa/` and warms up the
    model; wait for the `device=... enrolled=True` log line (1–2 min on a loaded CPU, seconds on GPU).
 4. Chrome → `chrome://extensions` → Developer mode → Load unpacked → `extension/`
