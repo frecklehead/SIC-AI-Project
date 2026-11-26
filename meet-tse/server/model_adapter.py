@@ -6,6 +6,7 @@ ECAPA-TDNN encoder; this file loads the checkpoint, caches the enrollment
 embedding once, and calls `model(mix, embedding)`.
 """
 import numpy as np
+import gc
 
 from bsrnn_tse import DEFAULT_MODEL_CFG, build_model
 
@@ -20,6 +21,7 @@ class Runner:
         self.vad_cfg = None
         self.device = "cpu"
         self.model = None
+        self.batched_ops = None
         self.half = False
         self.torch = None
         self.speaker_encoder = None
@@ -61,6 +63,8 @@ class Runner:
 
         self.model = model.to(self.device).eval()
         self.model.requires_grad_(False)
+        from batched_band_ops import BatchedBandOps
+        self.batched_ops = BatchedBandOps(self.model)
         self.half = bool(half) and self.device == "cuda"
         if self.half:  # autocast, not .half(): STFT/iSTFT must stay fp32
             self.autocast = lambda: torch.autocast(device_type="cuda", dtype=torch.float16)
@@ -89,10 +93,14 @@ class Runner:
             self.speaker_encoder = SpeakerEncoder(device=self.device)
         # Compute everything before replacing the current enrollment. If the
         # encoder rejects the clip, an existing working enrollment remains valid.
-        emb = self.speaker_encoder.embed(wav, vad_cfg=self.vad_cfg, max_s=self.enroll_max)
+        encoder = self.speaker_encoder
+        emb = encoder.embed(wav, vad_cfg=self.vad_cfg, max_s=self.enroll_max)
         self.enroll = wav
         self.cond = emb
         self.cond_t = self.torch.from_numpy(emb)[None].to(self.device)
+        self.speaker_encoder = None
+        del encoder
+        gc.collect()
         print(f"[adapter] enrollment: {len(self.enroll) / 16000:.1f}s -> embedding norm {np.linalg.norm(emb):.1f}")
 
     def _forward(self, mix_t):

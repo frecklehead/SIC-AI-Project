@@ -1,105 +1,96 @@
-"""CPU inference benchmark with hygiene checks.
-
-Prints median/p95 step time and RTF for each streaming window/hop.  RTF is
-step_time / hop_time; real-time needs RTF < 1 and we target < 0.7.
-
-Run:
-    python bench.py --ckpt ../../src/checkpoints/tse_bsrnn_big_best.pt --threads 6
-"""
-from __future__ import annotations
-
+"""Benchmark StatefulTSE on CPU for the requested chunk/thread combinations."""
 import argparse
-import os
+import platform
 import sys
-import time
 
 import numpy as np
 
 from model_adapter import Runner
+from stateful_engine import StatefulTSE
 
 
-def mem_available_gb() -> float:
-    with open("/proc/meminfo") as f:
-        for line in f:
-            if line.startswith("MemAvailable:"):
-                return int(line.split()[1]) / 1024 / 1024
-    return float("nan")
-
-
-def load_avg() -> float:
-    with open("/proc/loadavg") as f:
-        return float(f.read().split()[0])
-
-
-def hygiene():
-    cores = os.cpu_count() or 1
-    mem = mem_available_gb()
-    load = load_avg()
-    print(f"system: cores={cores}  available_ram={mem:.1f} GB  load1={load:.2f}")
-    if mem < 4.0:
-        print(f"WARNING: only {mem:.1f} GB RAM available (< 4 GB); timings will be noisy", file=sys.stderr)
-    if load > cores:
-        print(f"WARNING: load1 {load:.2f} > cores {cores}; timings will be noisy", file=sys.stderr)
-    return mem, load, cores
-
-
-def main() -> None:
-    p = argparse.ArgumentParser()
-    p.add_argument("--ckpt", required=True)
-    p.add_argument("--device", default="auto")
-    p.add_argument("--half", action="store_true")
-    p.add_argument("--threads", type=int, default=0,
-                   help="torch intra-op threads; 0 leaves the current value")
-    p.add_argument("--steps", type=int, default=30)
-    p.add_argument("--warmup", type=int, default=5)
-    p.add_argument("--windows", type=float, nargs="+", default=[1.0, 1.5])
-    p.add_argument("--hops", type=float, nargs="+", default=[0.16, 0.32, 0.5])
-    p.add_argument("--lookahead", type=float, default=0.16)
-    args = p.parse_args()
-
-    hygiene()
-    import torch
-    if args.threads > 0:
-        torch.set_num_threads(args.threads)
+def cpu_model():
+    if sys.platform == "win32":
         try:
-            torch.set_num_interop_threads(1)  # one DAG at a time; avoid oversubscription
-        except RuntimeError:
+            import winreg
+            key = winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"HARDWARE\DESCRIPTION\System\CentralProcessor\0",
+            )
+            with key:
+                return winreg.QueryValueEx(key, "ProcessorNameString")[0].strip()
+        except OSError:
             pass
-    print(f"torch={torch.__version__}  intra_threads={torch.get_num_threads()}  "
-          f"interop_threads={torch.get_num_interop_threads()}")
+    return platform.processor() or platform.machine()
 
-    runner = Runner(args.ckpt, args.device, args.half)
-    sr = 16000
-    runner.cond_t = torch.zeros(1, 192, device=runner.device)
-    runner.model.requires_grad_(False)
-    print(f"device={runner.device} half={runner.half} training={runner.model.training} "
-          f"requires_grad={any(q.requires_grad for q in runner.model.parameters())}")
 
-    rng = np.random.default_rng(0)
-    print(f"steps={args.steps} warmup={args.warmup}  (times in ms)")
-    print("window  hop    median    p95    RTF_med RTF_p95  latency_ms")
-    for window in args.windows:
-        n = int(round(window * sr))
-        x = (rng.standard_normal(n).astype(np.float32) * 0.1)
-        # A step's cost depends on the window, not on how often the server
-        # calls it.  Time 30 steps once per window and derive RTF per hop.
-        for _ in range(args.warmup):
-            runner(x)
-        times = []
-        for _ in range(args.steps):
-            t0 = time.perf_counter()
-            runner(x)
-            times.append((time.perf_counter() - t0) * 1e3)
-        med = float(np.median(times))
-        p95 = float(np.percentile(times, 95))
-        for hop in args.hops:
-            budget = hop * 1000.0
-            print(f"{window:5.2f} {hop:5.2f} {med:9.1f} {p95:7.1f} "
-                  f"{med / budget:7.2f} {p95 / budget:7.2f} "
-                  f"{1000 * (hop + args.lookahead + 0.008):9.1f}")
-    print(f"inference_mode_last_call={runner.last_inference_mode}")
-    assert runner.last_inference_mode, "Runner did not use torch.inference_mode()"
-    assert not any(q.requires_grad for q in runner.model.parameters()), "autograd is enabled"
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--ckpt", required=True)
+    parser.add_argument("--interop-threads", type=int, default=0)
+    parser.add_argument("--flush-denormal", action="store_true")
+    parser.add_argument("--int8", action="store_true", help="dynamically quantize nn.Linear to qint8")
+    parser.add_argument("--onnx-step", help="ONNX causal-step model with explicit LSTM states")
+    args = parser.parse_args()
+
+    import torch
+
+    if args.interop_threads:
+        torch.set_num_interop_threads(args.interop_threads)
+    if args.flush_denormal:
+        torch.set_flush_denormal(True)
+
+    if not torch.cuda.is_available():
+        print("device=CPU")
+    else:
+        print("device=CPU (CPU benchmark requested)")
+    print(f"cpu={cpu_model()} torch={torch.__version__}")
+    runner = Runner(args.ckpt, device="cpu")
+    if not runner.causal:
+        raise RuntimeError("checkpoint is not marked causal")
+    # Conditioning is only used to make a valid forward pass; its value does not
+    # affect the amount of work performed by the streaming network.
+    runner.cond_t = torch.zeros(1, 192)
+    if args.onnx_step and args.int8:
+        parser.error("--onnx-step and --int8 are separate measurements")
+    if args.int8:
+        runner.model = torch.ao.quantization.quantize_dynamic(
+            runner.model, {torch.nn.Linear}, dtype=torch.qint8
+        ).eval()
+        runner.batched_ops = None
+        print("dynamic_int8=enabled; using original per-band module path")
+    rng = np.random.default_rng(2026)
+    audio = (rng.standard_normal(5 * 16000).astype(np.float32) * 0.1)
+
+    print("threads chunk avg_ms p95_ms budget_ms RTF_avg RTF_p95")
+    chunk_choices = (4,) if args.onnx_step else (2, 4, 8)
+    for threads in (1, 2, 4):
+        torch.set_num_threads(threads)
+        runner.onnx_session = None
+        if args.onnx_step:
+            import onnxruntime as ort
+            opts = ort.SessionOptions()
+            opts.intra_op_num_threads = threads
+            opts.inter_op_num_threads = 1
+            runner.onnx_session = ort.InferenceSession(
+                args.onnx_step, sess_options=opts, providers=["CPUExecutionProvider"]
+            )
+        for chunk_frames in chunk_choices:
+            engine = StatefulTSE(runner, chunk_frames=chunk_frames)
+            block = chunk_frames * runner.model.hop
+            warm_samples = 16000
+            samples = 0
+            times = []
+            for start in range(0, len(audio) - block + 1, block):
+                engine.push(audio[start:start + block])
+                samples += block
+                if samples - block >= warm_samples:
+                    times.append(engine.last_step_ms)
+            budget = 1000.0 * block / 16000
+            avg = float(np.mean(times))
+            p95 = float(np.percentile(times, 95))
+            print(f"{threads:7d} {chunk_frames:6d} {avg:7.2f} {p95:7.2f} "
+                  f"{budget:9.2f} {avg / budget:7.3f} {p95 / budget:7.3f}")
 
 
 if __name__ == "__main__":

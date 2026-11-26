@@ -24,7 +24,7 @@ import numpy as np
 import soundfile as sf
 
 from model_adapter import Runner
-from resampler import StreamResampler
+from resampler import make_stream_resampler
 from stream_engine import SlidingWindowTSE
 
 
@@ -32,7 +32,7 @@ def read_mono(path: Path, sr: int) -> np.ndarray:
     wav, got = sf.read(path, dtype="float32", always_2d=True)
     wav = wav.mean(axis=1)
     if got != sr:
-        wav = StreamResampler(got, sr).process(wav)
+        wav = make_stream_resampler(got, sr).process(wav)
     return np.asarray(wav, np.float32)
 
 
