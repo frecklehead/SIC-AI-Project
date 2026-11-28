@@ -66,6 +66,36 @@ def make_ort_options(ort, threads, ort_spin=False):
     return opts
 
 
+def onnx_step_mismatch(session, runner):
+    """Return why an exported ONNX step does not match this checkpoint."""
+    layers = len(runner.model.layers)
+    expected_inputs = ["spec_ri", "spk"]
+    expected_outputs = ["mask_ri"]
+    for i in range(layers):
+        expected_inputs.extend((f"h{i}", f"c{i}"))
+        expected_outputs.extend((f"hout{i}", f"cout{i}"))
+    inputs, outputs = session.get_inputs(), session.get_outputs()
+    actual_inputs = [item.name for item in inputs]
+    actual_outputs = [item.name for item in outputs]
+    if actual_inputs != expected_inputs:
+        return (f"ONNX inputs {actual_inputs} do not match this checkpoint's expected "
+                f"inputs {expected_inputs}")
+    if actual_outputs != expected_outputs:
+        return (f"ONNX outputs {actual_outputs} do not match this checkpoint's expected "
+                f"outputs {expected_outputs}")
+    bands = len(runner.model.bands)
+    for i, layer in enumerate(runner.model.layers):
+        expected = (1, bands, layer.time.rnn.hidden_size)
+        for name in (f"h{i}", f"c{i}"):
+            shape = inputs[actual_inputs.index(name)].shape
+            if len(shape) != len(expected) or any(
+                isinstance(got, int) and got > 0 and got != want
+                for got, want in zip(shape, expected)
+            ):
+                return f"ONNX input {name} has shape {shape}; checkpoint expects {expected}"
+    return None
+
+
 def runtime_thread_info():
     try:
         import psutil
@@ -751,7 +781,17 @@ def main():
         runner.onnx_session = ort.InferenceSession(
             args.onnx_step, sess_options=opts, providers=["CPUExecutionProvider"]
         )
-        log.info("loaded ONNX Runtime step from %s", args.onnx_step)
+        mismatch = onnx_step_mismatch(runner.onnx_session, runner)
+        if mismatch:
+            log.warning(
+                "ONNX step %s is incompatible with checkpoint %s: %s. "
+                "Falling back to the checkpoint-compatible PyTorch stateful engine. "
+                "Re-export the ONNX step for this checkpoint for ONNX acceleration.",
+                args.onnx_step, args.ckpt, mismatch,
+            )
+            runner.onnx_session = None
+        else:
+            log.info("loaded checkpoint-compatible ONNX Runtime step from %s", args.onnx_step)
     else:
         runner.onnx_session = None
     use_stateful = runner.causal and not runner.dummy and runner.ready and not args.sliding

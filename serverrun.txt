@@ -1,0 +1,1 @@
+ ..\..\.venv\Scripts\python.exe server.py --ckpt "C:\Users\Thinkpad\Downloads\tse_causal_v2_best.pt" --enroll "C:\Users\Thinkpad\Downloads\Recording.wav" --threads 1 --interop-threads 1 --flush-denormal --chunk-frames 4 --onnx-step stateful_step.onnx --debug-timing 2>&1 | Tee-Object -FilePath run1.log

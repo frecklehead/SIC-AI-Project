@@ -27,6 +27,12 @@ host permission are allowed. Verified on Chrome 156 with no flags.
    16.83M parameters, frozen 192-d ECAPA enrollment conditioning). Use `--half` only on CUDA.
    Checkpoints with a `cfg.model` architecture config are supported, including causal v2
    (`causal=true`, `band_bidir=true`); the server defaults its lookahead to 0 for causal models.
+   For causal checkpoints, the PyTorch stateful engine adapts to the checkpoint's layer count.
+   If using `--onnx-step`, export a matching ONNX file first; the checked-in ONNX file may have
+   different recurrent-state inputs. The server detects a mismatch and falls back to PyTorch
+   instead of crashing. To export and run a checkpoint-matched ONNX step from `server/`:
+   `python export_onnx_step.py --ckpt /path/tse_causal_best.pt --output tse_causal_best_step.onnx`
+   then add `--onnx-step tse_causal_best_step.onnx --chunk-frames 4` to the server command.
    First start downloads the frozen ECAPA weights into `server/pretrained_ecapa/` and warms up the
    model; wait for the `device=... enrolled=True` log line (1–2 min on a loaded CPU, seconds on GPU).
 4. Chrome → `chrome://extensions` → Developer mode → Load unpacked → `extension/`
